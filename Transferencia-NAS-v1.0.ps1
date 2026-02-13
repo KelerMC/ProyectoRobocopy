@@ -3,23 +3,21 @@
     Script automatizado para transferencia de archivos a NAS mediante Robocopy
 
 .DESCRIPTION
-    Sistema completo de transferencia con validaciones, detección de conflictos,
-    monitoreo de progreso real, manejo de errores y protección contra pérdida de conexión
+    Sistema completo de transferencia con validaciones optimizadas, monitoreo eficiente,
+    manejo de errores y protección contra pérdida de conexión.
+    Optimizado para carpetas grandes y rutas largas (+240 caracteres).
 
-.NOTES
-    Versión: 3.0
-    Autor: Sistema Automatizado
-    Fecha: 2026-02-12
-    
-.FEATURES
-    - Detección inteligente de conflictos
-    - Modo de comparación rápido y avanzado (hash MD5)
-    - Progreso real en tiempo real
-    - Validación de espacio en destino
-    - Timeout dinámico según tamaño
-    - Protección contra pérdida de conexión
-    - Manejo de archivos especiales y en uso
+FEATURES
+    - Arquitectura UNC directa (sin mapeo de unidades)
+    - Validaciones eficientes con un solo escaneo de origen
+    - Detección simple y rápida de archivos existentes
+    - Monitoreo liviano basado en tamaño de log
+    - Protección contra pérdida de conexión y bucles de reintentos
+    - Timeout dinámico según tamaño de archivos
+    - Manejo de rutas largas (>240 caracteres)
     - Logs individuales con rotación automática
+    - Exclusión opcional de archivos temporales
+    - Optimizado para proyectos de ingeniería civil
 #>
 
 #Requires -Version 5.1
@@ -27,7 +25,6 @@
 #region ===== CONFIGURACIÓN GLOBAL =====
 
 # Constantes del sistema
-$SCRIPT_VERSION = "3.1"
 $LOG_DIRECTORY = "C:\Logs"
 $LOG_RETENTION_DAYS = 30
 $CONNECTION_CHECK_INTERVAL = 10  # segundos
@@ -81,7 +78,7 @@ function Confirm-UserAction {
         [string]$Message,
         
         [Parameter()]
-        [string]$PromptText = "Ingrese S para continuar"
+        [string]$PromptText = "Ingrese S para continuar o N para colocar otro destino"
     )
     
     Write-SectionHeader -Title "CONFIRMACION DE OPERACION" -Color Cyan
@@ -111,23 +108,7 @@ function Test-NASConnection {
     }
 }
 
-function Get-FileHashMD5 {
-    <#
-    .SYNOPSIS
-        Calcula el hash MD5 de un archivo
-    #>
-    param(
-        [Parameter(Mandatory)]
-        [string]$FilePath
-    )
-    
-    try {
-        $hash = Get-FileHash -Path $FilePath -Algorithm MD5 -ErrorAction Stop
-        return $hash.Hash
-    } catch {
-        return $null
-    }
-}
+
 
 function Get-FolderSize {
     <#
@@ -142,11 +123,16 @@ function Get-FolderSize {
     $files = Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue
     $totalSize = ($files | Measure-Object -Property Length -Sum).Sum
     
+    # Asegurar que totalSize nunca sea null
+    if ($null -eq $totalSize) {
+        $totalSize = 0
+    }
+    
     return @{
-        TotalBytes = if ($totalSize) { $totalSize } else { 0 }
+        TotalBytes = $totalSize
         TotalMB = [math]::Round(($totalSize / 1MB), 2)
         TotalGB = [math]::Round(($totalSize / 1GB), 2)
-        FileCount = $files.Count
+        FileCount = if ($files) { $files.Count } else { 0 }
     }
 }
 
@@ -327,121 +313,6 @@ function Show-SpecialAttributesInfo {
 
 #endregion
 
-#region ===== FUNCIONES DE DETECCIÓN DE CONFLICTOS =====
-
-function Find-FileConflicts {
-    <#
-    .SYNOPSIS
-        Detecta conflictos entre archivos de origen y destino
-    #>
-    param(
-        [Parameter(Mandatory)]
-        [string]$SourcePath,
-        
-        [Parameter(Mandatory)]
-        [string]$DestinationPath,
-        
-        [Parameter()]
-        [bool]$UseHashComparison = $false
-    )
-    
-    $conflicts = @()
-    $filesForHash = @()
-    
-    if (-not (Test-Path $DestinationPath)) {
-        return @{ Conflicts = $conflicts; HasConflicts = $false }
-    }
-    
-    $destFiles = Get-ChildItem -Path $DestinationPath -Recurse -File -ErrorAction SilentlyContinue
-    if ($destFiles.Count -eq 0) {
-        return @{ Conflicts = $conflicts; HasConflicts = $false }
-    }
-    
-    Write-Host "Fase 1: Comparando metadata..." -ForegroundColor Cyan
-    $sourceFiles = Get-ChildItem -Path $SourcePath -Recurse -File -ErrorAction SilentlyContinue
-    $fileCount = 0
-    
-    foreach ($sourceFile in $sourceFiles) {
-        $fileCount++
-        $relativePath = $sourceFile.FullName.Substring($SourcePath.Length)
-        $destFilePath = Join-Path $DestinationPath $relativePath
-        
-        if (Test-Path $destFilePath) {
-            $destFile = Get-Item $destFilePath
-            
-            $sourceDate = $sourceFile.LastWriteTime
-            $destDate = $destFile.LastWriteTime
-            $sourceSize = $sourceFile.Length
-            $destSize = $destFile.Length
-            
-            $status = ""
-            $needsHash = $false
-            
-            if ($sourceDate -gt $destDate) {
-                $status = "[MAS NUEVO]"
-            } elseif ($sourceDate -lt $destDate) {
-                $status = "[MAS VIEJO]"
-            } elseif ($sourceSize -ne $destSize) {
-                $status = "[DIFERENTE TAMAÑO]"
-            } else {
-                # Mismo tamaño y fecha
-                if ($UseHashComparison) {
-                    $needsHash = $true
-                    $filesForHash += @{
-                        Source = $sourceFile.FullName
-                        Destination = $destFilePath
-                        RelativePath = $relativePath
-                    }
-                } else {
-                    $status = "[IDENTICO]"
-                }
-            }
-            
-            if ($status) {
-                $conflicts += "$status $relativePath"
-            }
-        }
-    }
-    
-    Write-Host "Fase 1 completada: $fileCount archivo(s) analizados" -ForegroundColor Green
-    
-    # Fase 2: Verificar hash si es necesario
-    if ($UseHashComparison -and $filesForHash.Count -gt 0) {
-        Write-Host "`nFase 2: Calculando hash de $($filesForHash.Count) archivo(s)..." -ForegroundColor Cyan
-        $hashCount = 0
-        
-        foreach ($item in $filesForHash) {
-            $hashCount++
-            Write-Progress -Activity "Calculando hash MD5" `
-                -Status "Archivo $hashCount de $($filesForHash.Count)" `
-                -PercentComplete (($hashCount / $filesForHash.Count) * 100)
-            
-            $hashSource = Get-FileHashMD5 -FilePath $item.Source
-            $hashDest = Get-FileHashMD5 -FilePath $item.Destination
-            
-            if ($null -eq $hashSource -or $null -eq $hashDest) {
-                $status = "ERROR_HASH"
-            } elseif ($hashSource -eq $hashDest) {
-                $status = "IDENTICO_HASH_OK"
-            } else {
-                $status = "[IDENTICO - HASH DIFERENTE]"
-            }
-            
-            $conflicts += "$status $($item.RelativePath)"
-        }
-        
-        Write-Progress -Activity "Calculando hash MD5" -Completed
-        Write-Host "Fase 2 completada: Hash verificado" -ForegroundColor Green
-    }
-    
-    return @{
-        Conflicts = $conflicts
-        HasConflicts = ($conflicts.Count -gt 0)
-    }
-}
-
-#endregion
-
 #region ===== FUNCIÓN PRINCIPAL DE TRANSFERENCIA =====
 
 function Start-FileTransfer {
@@ -480,13 +351,16 @@ function Start-FileTransfer {
         "`"$Source`"",
         "`"$Destination`"",
         "/E /Z /MT:16 /R:10 /W:30 $Strategy $ExcludeParams",
-        "/COPY:DATSOU /DCOPY:DAT /A-:SH",
+        "/COPY:DATS /DCOPY:DAT /A-:SH",
         "/LOG:`"$LogFile`"",
         "/NFL /NDL /NP",
         "/V /TS /FP /BYTES /X /XX"
     )
     
     Write-Host "Iniciando transferencia...`n" -ForegroundColor Green
+    Write-Host "Ejecutando: robocopy $($robocopyArgs -join ' ')`n" -ForegroundColor Gray
+    Write-Host "Copiando archivos... (puede tardar varios minutos)" -ForegroundColor Cyan
+    Write-Host "Monitor de actividad:" -ForegroundColor Cyan
     
     # Iniciar proceso de Robocopy
     $process = Start-Process robocopy -ArgumentList $robocopyArgs -NoNewWindow -PassThru
@@ -495,10 +369,19 @@ function Start-FileTransfer {
     $lastLogSize = 0
     $lastActivity = Get-Date
     $lastConnectionCheck = Get-Date
+    $checkCount = 0
+    $errorCount = 0
+    $lastErrorCheck = Get-Date
+    
+    # Mostrar progreso inicial inmediatamente
+    Write-Progress -Activity "Copiando archivos..." `
+        -Status "Iniciando copia... Espere mientras Robocopy analiza los archivos" `
+        -PercentComplete 0
     
     # Monitoreo del proceso
     do {
         Start-Sleep 2
+        $checkCount++
         
         # Verificar si el proceso sigue activo
         if (-not (Get-Process -Id $process.Id -ErrorAction SilentlyContinue)) {
@@ -539,6 +422,37 @@ function Start-FileTransfer {
             if ($logSize -gt $lastLogSize) {
                 $lastLogSize = $logSize
                 $lastActivity = Get-Date
+                
+                # Detectar errores repetidos cada 30 segundos
+                if (((Get-Date) - $lastErrorCheck).TotalSeconds -ge 30) {
+                    $logContent = Get-Content $LogFile -Tail 20 -ErrorAction SilentlyContinue
+                    $recentErrors = ($logContent | Select-String -Pattern "ERROR|Esperando.*segundos.*Reintentando").Count
+                    
+                    if ($recentErrors -gt 5) {
+                        $errorCount++
+                        if ($errorCount -ge 3) {
+                            Write-Progress -Activity "Copiando archivos..." -Completed
+                            Write-Host "`n`nERROR: Robocopy atascado en bucle de reintentos" -ForegroundColor Red
+                            Write-Host "Errores detectados en log. Revise: $LogFile" -ForegroundColor Yellow
+                            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                            Pause
+                            exit 1
+                        }
+                    } else {
+                        $errorCount = 0
+                    }
+                    $lastErrorCheck = Get-Date
+                }
+                
+                # Mostrar progreso simple basado en log
+                $logSizeKB = [math]::Round($logSize/1KB, 1)
+                Write-Progress -Activity "Copiando archivos..." `
+                    -Status "Robocopy activo - Log: $logSizeKB KB" `
+                    -PercentComplete 50
+                
+                if ($checkCount % 15 -eq 0) {
+                    Write-Host " [Log: $logSizeKB KB - Activo]" -ForegroundColor Cyan
+                }
             }
         }
         
@@ -555,28 +469,10 @@ function Start-FileTransfer {
             Pause
             exit 1
         }
-        
-        # Calcular y mostrar progreso real
-        $destSize = 0
-        if (Test-Path $Destination) {
-            $destFiles = Get-ChildItem -Path $Destination -Recurse -File -ErrorAction SilentlyContinue
-            $destSize = ($destFiles | Measure-Object -Property Length -Sum).Sum
-        }
-        
-        $percentComplete = 0
-        if ($SourceSizeBytes -gt 0) {
-            $percentComplete = [math]::Min(99, [math]::Round(($destSize / $SourceSizeBytes) * 100, 0))
-        }
-        
-        $destSizeMB = [math]::Round($destSize / 1MB, 2)
-        $sourceSizeMB = [math]::Round($SourceSizeBytes / 1MB, 2)
-        
-        Write-Progress -Activity "Copiando archivos..." `
-            -Status "Transferido: $destSizeMB MB de $sourceSizeMB MB" `
-            -PercentComplete $percentComplete
             
     } while ($true)
     
+    Write-Host "`n`nRobocopy completado. Procesando resultado..." -ForegroundColor Green
     Write-Progress -Activity "Copiando archivos..." -Completed
     
     # Esperar a que termine el proceso y obtener exit code
@@ -637,11 +533,10 @@ function Get-RobocopyExitCodeMessage {
 
 # Inicialización
 Clear-Host
-$Host.UI.RawUI.WindowTitle = "Transferencia Automatizada NAS v$SCRIPT_VERSION"
+$Host.UI.RawUI.WindowTitle = "Transferencia Automatizada NAS"
 
 Write-Host "================================"
 Write-Host " TRANSFERENCIA AUTOMATIZADA NAS"
-Write-Host " Versión $SCRIPT_VERSION"
 Write-Host "================================"
 Write-Host ""
 
@@ -711,32 +606,58 @@ $Script:NASPath = $selectedNAS
 Write-Host "Conectando al NAS..." -ForegroundColor Cyan
 Write-Host "Ruta: $Script:NASPath" -ForegroundColor Gray
 
-# Verificar si necesita credenciales
-net use $Script:NASPath 2>$null | Out-Null
+# Verificar si necesita credenciales intentando acceso directo
+$needsCredentials = $false
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Se requieren credenciales." -ForegroundColor Yellow
-    $credential = Get-Credential -Message "Ingrese credenciales para $Script:NASPath"
+try {
+    Write-Host "Verificando acceso..." -ForegroundColor Gray
+    $null = Get-ChildItem -Path $Script:NASPath -ErrorAction Stop | Select-Object -First 1
+    Write-Host "Conexión establecida correctamente (credenciales guardadas)" -ForegroundColor Green
+} catch {
+    $needsCredentials = $true
+}
+
+if ($needsCredentials) {
+    Write-Host "`nSe requieren credenciales para acceder al NAS." -ForegroundColor Yellow
+    Write-Host "Se abrirá una ventana para ingresar usuario y contraseña...`n" -ForegroundColor Cyan
+    
+    try {
+        $credential = Get-Credential -Message "Ingrese sus credenciales para $Script:NASPath"
+    } catch {
+        Write-Host "ERROR: No se pudo abrir ventana de credenciales" -ForegroundColor Red
+        Write-Host "Intente conectarse primero manualmente al NAS desde Explorador de Archivos`n" -ForegroundColor Yellow
+        Pause
+        exit 1
+    }
     
     if ($null -eq $credential) {
-        Write-Host "`nERROR: Operación cancelada" -ForegroundColor Red
+        Write-Host "`nOperación cancelada por el usuario" -ForegroundColor Yellow
+        Write-Host "Puede conectarse manualmente al NAS desde Explorador de Archivos y ejecutar el script nuevamente`n" -ForegroundColor Cyan
+        Pause
         exit 1
     }
     
     $username = $credential.UserName
     $password = $credential.GetNetworkCredential().Password
     
+    Write-Host "Autenticando con el NAS..." -ForegroundColor Cyan
+    
     # Autenticar con credenciales
     net use $Script:NASPath /user:$username $password /persistent:no 2>$null | Out-Null
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "`nERROR: No se pudo conectar. Verifique credenciales." -ForegroundColor Red
+        Write-Host "`nERROR: No se pudo conectar al NAS" -ForegroundColor Red
+        Write-Host "Verifique que:" -ForegroundColor Yellow
+        Write-Host "  - El usuario y contraseña sean correctos" -ForegroundColor Yellow
+        Write-Host "  - El NAS esté encendido y accesible" -ForegroundColor Yellow
+        Write-Host "  - Tiene permisos para acceder a esta carpeta`n" -ForegroundColor Yellow
         Pause
         exit 1
     }
+    
+    Write-Host "Conexión establecida correctamente" -ForegroundColor Green
 }
 
-Write-Host "Conexión establecida correctamente" -ForegroundColor Green
 Write-Host "Las credenciales se mantendrán activas durante la sesión`n" -ForegroundColor Cyan
 
 # Bucle principal de transferencias
@@ -753,26 +674,46 @@ do {
         continue
     }
     
-    # Validaciones de origen
-    Write-Host "`nValidando archivos de origen..." -ForegroundColor Cyan
+    # Validaciones de origen (OPTIMIZADO - un solo escaneo)
+    Write-Host "`nAnalizando archivos de origen..." -ForegroundColor Cyan
+    Write-Host "Esto puede tardar unos segundos en carpetas grandes..." -ForegroundColor Gray
     
-    $hasInvalidChars = -not (Test-InvalidCharactersInFiles -Path $sourcePath)
-    if ($hasInvalidChars) {
-        $continueWithInvalidChars = Read-Host "`n¿Desea intentar copiar de todos modos? (S/N)"
+    # Hacer UN SOLO escaneo del directorio
+    $allFiles = Get-ChildItem -Path $sourcePath -Recurse -File -Force -ErrorAction SilentlyContinue
+    
+    if ($null -eq $allFiles -or $allFiles.Count -eq 0) {
+        Write-Host "`nADVERTENCIA: No se encontraron archivos en la ruta de origen" -ForegroundColor Yellow
+        $continueEmpty = Read-Host "¿Desea continuar de todos modos? (S/N)"
+        if ($continueEmpty -notmatch '^(S|SI|Y|YES)$') {
+            continue
+        }
+    }
+    
+    Write-Host "Archivos encontrados: $($allFiles.Count)" -ForegroundColor Green
+    Write-Host "`nRealizando validaciones..." -ForegroundColor Cyan
+    
+    # Validar caracteres inválidos
+    $invalidChars = '[<>"|?*]'
+    $problematicFiles = $allFiles | Where-Object { $_.Name -match $invalidChars }
+    
+    if ($problematicFiles) {
+        Write-Host "`nADVERTENCIA: $($problematicFiles.Count) archivo(s) con caracteres especiales" -ForegroundColor Yellow
+        $continueWithInvalidChars = Read-Host "¿Desea continuar? (S/N)"
         if ($continueWithInvalidChars -notmatch '^(S|SI|Y|YES)$') {
             continue
         }
     }
     
-    Test-LongPaths -Path $sourcePath
-    Show-SpecialAttributesInfo -Path $sourcePath
+    # Validar rutas largas
+    $longPaths = $allFiles | Where-Object { $_.FullName.Length -gt 240 }
+    if ($longPaths) {
+        Write-Host "INFO: $($longPaths.Count) archivo(s) con rutas largas (>240 caracteres)" -ForegroundColor Cyan
+    }
     
-    $hasFilesInUse = -not (Test-FilesInUse -Path $sourcePath)
-    if ($hasFilesInUse) {
-        $continueWithLocked = Read-Host "¿Desea continuar de todos modos? (S/N)"
-        if ($continueWithLocked -notmatch '^(S|SI|Y|YES)$') {
-            continue
-        }
+    # Validar archivos especiales
+    $specialFiles = $allFiles | Where-Object { $_.Attributes -match 'ReadOnly|Hidden|System' }
+    if ($specialFiles) {
+        Write-Host "INFO: $($specialFiles.Count) archivo(s) con atributos especiales" -ForegroundColor Cyan
     }
     
     # Bucle de validación de destino
@@ -797,112 +738,69 @@ do {
         }
     } while ($true)
     
-    # Selección de modo de comparación
-    Write-SectionHeader -Title "MODO DE COMPARACION" -Color Cyan
-    Write-Host "  1. Rápido (fecha y tamaño) - Recomendado"
-    Write-Host "  2. Avanzado (hash MD5) - Más preciso pero más lento"
-    Write-Host ""
+    # Calcular tamaño de origen usando archivos ya escaneados
+    Write-Host "`nCalculando tamaño total..." -ForegroundColor Cyan
+    $totalSize = ($allFiles | Measure-Object -Property Length -Sum).Sum
+    if ($null -eq $totalSize) { $totalSize = 0 }
     
-    do {
-        $comparisonMode = Read-Host "Seleccione modo (1-2)"
-        
-        switch ($comparisonMode) {
-            "1" {
-                Write-Host "`nModo seleccionado: Rápido" -ForegroundColor Green
-                $useHash = $false
-                break
-            }
-            "2" {
-                Write-Host "`nModo seleccionado: Avanzado (con hash)" -ForegroundColor Green
-                Write-Host "NOTA: Este modo puede tomar varios minutos`n" -ForegroundColor Yellow
-                $useHash = $true
-                break
-            }
-            default {
-                Write-Host "Opción inválida" -ForegroundColor Yellow
-                $comparisonMode = $null
-            }
-        }
-    } while ($null -eq $comparisonMode)
-    
-    # Calcular tamaño de origen
-    Write-Host "Calculando tamaño de origen..." -ForegroundColor Cyan
-    $sourceInfo = Get-FolderSize -Path $sourcePath
-    $totalMB = $sourceInfo.TotalMB
-    $fileCount = $sourceInfo.FileCount
+    $totalMB = [math]::Round($totalSize / 1MB, 2)
+    $fileCount = $allFiles.Count
     Write-Host "Tamaño total: $totalMB MB - $fileCount archivos`n" -ForegroundColor Green
     
     # Crear directorio destino
     New-Item -ItemType Directory -Path $finalDestination -Force | Out-Null
     
-    # Detectar conflictos
-    Write-Host "Analizando archivos para detectar conflictos..." -ForegroundColor Cyan
-    if ($useHash) {
-        Write-Host "Modo: Avanzado (con verificación hash)" -ForegroundColor Cyan
-    } else {
-        Write-Host "Modo: Rápido (fecha y tamaño)" -ForegroundColor Cyan
-    }
+    # Detectar si destino tiene archivos (RÁPIDO - sin escaneo profundo)
+    Write-Host "`nVerificando destino..." -ForegroundColor Cyan
     
-    $conflictResult = Find-FileConflicts -SourcePath $sourcePath `
-        -DestinationPath $finalDestination `
-        -UseHashComparison $useHash
+    $hasExistingFiles = $false
+    $existingFiles = @()
+    
+    if (Test-Path $finalDestination) {
+        # Obtener primeros archivos para muestra rápida
+        $existingFiles = @(Get-ChildItem -Path $finalDestination -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 50)
+        $hasExistingFiles = ($existingFiles.Count -gt 0)
+    }
     
     $strategyParams = ""
     
-    if ($conflictResult.HasConflicts) {
-        Write-SectionHeader -Title "CONFLICTOS DETECTADOS" -Color Yellow
-        Write-Host "Se encontraron $($conflictResult.Conflicts.Count) archivo(s) que ya existen`n" -ForegroundColor Yellow
+    if ($hasExistingFiles) {
+        Write-Host "El destino contiene archivos existentes" -ForegroundColor Yellow
         
-        $showCount = [math]::Min(10, $conflictResult.Conflicts.Count)
-        Write-Host "Primeros $showCount archivo(s) con conflicto:" -ForegroundColor Cyan
-        for ($i = 0; $i -lt $showCount; $i++) {
-            Write-Host "  - $($conflictResult.Conflicts[$i])"
+        # Preguntar si quiere ver la lista
+        $showFiles = Read-Host "`n¿Desea ver la lista de archivos existentes? (S/N)"
+        
+        if ($showFiles -match '^(S|SI|Y|YES)$') {
+            Write-Host "`nPrimeros archivos encontrados:" -ForegroundColor Cyan
+            $showCount = [math]::Min(20, $existingFiles.Count)
+            for ($i = 0; $i -lt $showCount; $i++) {
+                $relPath = $existingFiles[$i].FullName.Replace($finalDestination, "")
+                Write-Host "  - $relPath" -ForegroundColor Gray
+            }
+            if ($existingFiles.Count -gt 20) {
+                Write-Host "  ... y potencialmente más archivos" -ForegroundColor Gray
+            }
         }
         
-        if ($conflictResult.Conflicts.Count -gt 10) {
-            Write-Host "  ... y $($conflictResult.Conflicts.Count - 10) más" -ForegroundColor Gray
-        }
-        
-        Write-SectionHeader -Title "ESTRATEGIA DE COPIA" -Color Cyan
+        Write-Host ""
+        Write-Host "Seleccione estrategia de copia:" -ForegroundColor Cyan
         Write-Host "  1. Reemplazar si es más nuevo (recomendado)"
-        Write-Host "  2. Omitir archivos existentes (no sobrescribir)"
-        Write-Host "  3. Sobrescribir todo (reemplazar todos)"
-        Write-Host "  4. Cancelar operación"
+        Write-Host "  2. Omitir archivos existentes"
+        Write-Host "  3. Sobrescribir todo"
         Write-Host ""
         
-        do {
-            $strategyOption = Read-Host "Seleccione estrategia (1-4)"
-            
-            switch ($strategyOption) {
-                "1" {
-                    $strategyParams = ""
-                    Write-Host "`nEstrategia: Reemplazar archivos más nuevos" -ForegroundColor Green
-                    break
-                }
-                "2" {
-                    $strategyParams = "/XC /XN /XO"
-                    Write-Host "`nEstrategia: Omitir archivos existentes" -ForegroundColor Green
-                    break
-                }
-                "3" {
-                    $strategyParams = "/IS"
-                    Write-Host "`nEstrategia: Sobrescribir todos los archivos" -ForegroundColor Green
-                    break
-                }
-                "4" {
-                    Write-Host "`nOperación cancelada" -ForegroundColor Yellow
-                    continue
-                }
-                default {
-                    Write-Host "Opción inválida" -ForegroundColor Yellow
-                    $strategyOption = $null
-                }
-            }
-        } while ($null -eq $strategyOption)
+        $strategy = Read-Host "Seleccione (1-3, Enter=1)"
+        if ([string]::IsNullOrWhiteSpace($strategy)) { $strategy = "1" }
         
+        switch ($strategy) {
+            "1" { $strategyParams = ""; Write-Host "Estrategia: Reemplazar más nuevos" -ForegroundColor Green }
+            "2" { $strategyParams = "/XC /XN /XO"; Write-Host "Estrategia: Omitir existentes" -ForegroundColor Green }
+            "3" { $strategyParams = "/IS"; Write-Host "Estrategia: Sobrescribir todo" -ForegroundColor Green }
+            default { $strategyParams = "" }
+        }
         Write-Host ""
     } else {
-        Write-Host "No se detectaron conflictos. Procediendo con copia normal`n" -ForegroundColor Green
+        Write-Host "Destino vacío. Procediendo con copia normal`n" -ForegroundColor Green
     }
     
     # Opciones avanzadas
@@ -936,10 +834,10 @@ do {
         if ($mappedDrive) {
             $freeSpaceGB = [math]::Round($mappedDrive.FreeSpace / 1GB, 2)
             
-            Write-Host "Espacio requerido: $($sourceInfo.TotalGB) GB" -ForegroundColor Cyan
+            Write-Host "Espacio requerido: $totalGB GB" -ForegroundColor Cyan
             Write-Host "Espacio disponible: $freeSpaceGB GB" -ForegroundColor Cyan
             
-            if ($mappedDrive.FreeSpace -lt ($sourceInfo.TotalBytes * 1.1)) {
+            if ($mappedDrive.FreeSpace -lt ($totalSize * 1.1)) {
                 Write-Host "`nADVERTENCIA: Espacio insuficiente" -ForegroundColor Red
                 $continueAnyway = Read-Host "¿Continuar de todos modos? (S/N)"
                 if ($continueAnyway -notmatch '^(S|SI|Y|YES)$') {
@@ -956,7 +854,8 @@ do {
     }
     
     # Calcular timeout dinámico
-    $timeoutSeconds = [math]::Max($MIN_TIMEOUT_SECONDS, 60 * [math]::Ceiling($sourceInfo.TotalGB))
+    $totalGB = [math]::Round($totalSize / 1GB, 2)
+    $timeoutSeconds = [math]::Max($MIN_TIMEOUT_SECONDS, 60 * [math]::Ceiling($totalGB))
     Write-Host "Timeout configurado: $([math]::Round($timeoutSeconds / 60, 1)) minutos (ajustado según tamaño)`n" -ForegroundColor Cyan
     
     # Configurar parámetros de Robocopy
@@ -973,7 +872,7 @@ do {
         -Strategy $strategyParams `
         -ExcludeParams $excludeParams `
         -TimeoutSeconds $timeoutSeconds `
-        -SourceSizeBytes $sourceInfo.TotalBytes `
+        -SourceSizeBytes $totalSize `
         -NASPath $Script:NASPath
     
     # Validar resultado
@@ -1007,13 +906,36 @@ do {
     Write-Host ""
     
     if (Test-Path $currentLogFile) {
-        $summary = Select-String $currentLogFile -Pattern "^ *Total" -Context 1,20
-        if ($summary) {
-            $summary.Context.PreContext
-            $summary.Line
-            $summary.Context.PostContext
+        # Buscar sección de resumen de Robocopy
+        $logContent = Get-Content $currentLogFile
+        $summaryStart = -1
+        
+        for ($i = 0; $i -lt $logContent.Count; $i++) {
+            if ($logContent[$i] -match "^\s+(Dirs\s*:|Archivos\s*:|Bytes\s*:)" -or 
+                $logContent[$i] -match "^\s+Total\s+Copiado\s+Omitido" -or
+                $logContent[$i] -match "------------------------------------------------------------------------------" -and 
+                $i -gt 10 -and $logContent.Count - $i -lt 50) {
+                $summaryStart = $i
+                break
+            }
+        }
+        
+        if ($summaryStart -ge 0) {
+            # Mostrar desde el inicio del resumen hasta el final o las próximas 30 líneas
+            $endLine = [math]::Min($summaryStart + 30, $logContent.Count - 1)
+            for ($i = $summaryStart; $i -le $endLine; $i++) {
+                # Saltar líneas que solo contienen guiones o están vacías
+                if ($logContent[$i] -match "^[\s-]*$") {
+                    continue
+                }
+                if ($logContent[$i] -match "Finalizado|Ended" -and $i -gt $summaryStart + 5) {
+                    break
+                }
+                Write-Host $logContent[$i]
+            }
         } else {
-            Write-Host "No se encontró resumen en el log"
+            Write-Host "No se encontró resumen en el log" -ForegroundColor Yellow
+            Write-Host "Verifique el archivo de log para más detalles: $currentLogFile" -ForegroundColor Gray
         }
     }
     
