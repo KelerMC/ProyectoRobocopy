@@ -507,15 +507,8 @@ function Get-RobocopyExitCodeMessage {
     
     switch ($ExitCode) {
         0 {
-            $result.Message = "Sin cambios - No se copió ningún archivo"
-            $result.Color = "Yellow"
-            $result.Details = @(
-                "Posibles causas:",
-                "  • Los archivos de origen NO son más nuevos que los del destino",
-                "  • Las fechas de modificación son iguales o más viejas",
-                "  • No hay archivos nuevos para copiar",
-                "Revise el resumen arriba para confirmar: Copiado = 0, Omitido = todos"
-            )
+            $result.Message = "Sin cambios - Archivos ya sincronizados"
+            $result.Color = "Cyan"
         }
         1 {
             $result.Message = "Éxito - Archivos copiados correctamente"
@@ -842,12 +835,13 @@ do {
             
             Write-Host "`n" -NoNewline
             Write-Host "========================================" -ForegroundColor Cyan
-            Write-Host "PREDICCIÓN (basada en muestra de $showCount archivos):" -ForegroundColor Cyan
+            Write-Host "PREDICCIÓN PARA ESTRATEGIA #1 (Reemplazar si es más nuevo):" -ForegroundColor Cyan
             Write-Host "========================================" -ForegroundColor Cyan
             Write-Host "  ✓ Se copiarán (nuevos o más recientes): $willCopy" -ForegroundColor Green
             Write-Host "  ✗ Se omitirán (misma fecha o más viejos): $willSkip" -ForegroundColor Gray
             Write-Host "`n" -NoNewline
-            Write-Host "  💡 Este análisis muestra archivos de TU ORIGEN" -ForegroundColor Yellow
+            Write-Host "  💡 Este análisis es SOLO para estrategia #1" -ForegroundColor Yellow
+            Write-Host "     Si elige opción 2 o 3, el comportamiento será diferente" -ForegroundColor Gray
             Write-Host "     Robocopy procesará los $fileCount archivos totales" -ForegroundColor Cyan
             Write-Host "========================================" -ForegroundColor Cyan
         }
@@ -866,9 +860,10 @@ do {
         
         switch ($strategy) {
             "1" { 
-                $strategyParams = ""
+                $strategyParams = "/XO"
                 Write-Host "Estrategia: Reemplazar más nuevos" -ForegroundColor Green
-                Write-Host "Robocopy copiará archivos cuya fecha de origen sea más reciente" -ForegroundColor Cyan
+                Write-Host "Robocopy copiará solo archivos cuya fecha de origen sea más reciente" -ForegroundColor Cyan
+                Write-Host "Omitirá automáticamente archivos con misma fecha o más viejos" -ForegroundColor Gray
             }
             "2" { 
                 $strategyParams = "/XC /XN /XO"
@@ -876,11 +871,12 @@ do {
                 Write-Host "Robocopy NO tocará ningún archivo que ya exista en destino" -ForegroundColor Cyan
             }
             "3" { 
-                $strategyParams = "/IS"
+                $strategyParams = "/IS /IT"
                 Write-Host "Estrategia: Sobrescribir todo" -ForegroundColor Green
                 Write-Host "Robocopy reemplazará TODOS los archivos sin importar la fecha" -ForegroundColor Yellow
+                Write-Host "Incluye archivos idénticos (fuerza copia completa)" -ForegroundColor Gray
             }
-            default { $strategyParams = "" }
+            default { $strategyParams = "/XO" }
         }
         Write-Host ""
     } else {
@@ -959,51 +955,26 @@ do {
         -SourceSizeBytes $totalSize `
         -NASPath $Script:NASPath
     
-    # Validar resultado
-    Write-SectionHeader -Title "VALIDACION DE RESULTADO" -Color Cyan
-    Write-Host "Código de salida Robocopy RAW: $exitCode" -ForegroundColor Cyan
-    
-    # Detectar archivos copiados del log (validación adicional)
-    $actualFilesCopied = 0
-    $actualFilesSkipped = 0
+    # Validar resultado (corrección silenciosa de exit code si es necesario)
     if (Test-Path $currentLogFile) {
         $logContent = Get-Content $currentLogFile -ErrorAction SilentlyContinue
         
-        # Buscar línea de resumen de archivos
-        $fileSummaryLine = $logContent | Select-String -Pattern "^\s+Archivos:\s+" | Select-Object -Last 1
-        if ($fileSummaryLine) {
-            # Parsear: "Archivos:  16  13  3  0  0  0"
-            # Formato: Total, Copiado, Omitido, No coincide, ERROR, Extras
-            if ($fileSummaryLine -match "Archivos:\s+(\d+)\s+(\d+)\s+(\d+)") {
+        # Detectar archivos copiados del log
+        $actualFilesCopied = 0
+        foreach ($line in $logContent) {
+            if ($line -match "^\s*Archivos:\s+(\d+)\s+(\d+)\s+(\d+)") {
                 $actualFilesCopied = [int]$matches[2]
-                $actualFilesSkipped = [int]$matches[3]
-                Write-Host "Archivos copiados (según log): $actualFilesCopied" -ForegroundColor $(if ($actualFilesCopied -gt 0) { 'Green' } else { 'Gray' })
-                Write-Host "Archivos omitidos (según log): $actualFilesSkipped" -ForegroundColor Gray
+                break
             }
         }
         
-        # Corregir exit code si es necesario
+        # Corregir exit code si es necesario (silenciosamente)
         if ($exitCode -eq 0 -and $actualFilesCopied -gt 0) {
-            Write-Host ""
-            Write-Host "⚠️ CORRECCIÓN: El exit code era 0 pero se copiaron $actualFilesCopied archivos" -ForegroundColor Yellow
-            Write-Host "   Ajustando exit code a 1 (Éxito con archivos copiados)" -ForegroundColor Yellow
             $exitCode = 1
-        }
-        
-        # Detectar archivos modificados durante copia
-        $changedFiles = $logContent | Select-String -Pattern "ERROR.*file has changed|changed during copy" -SimpleMatch
-        
-        if ($changedFiles) {
-            Write-Host ""
-            Write-Host "ADVERTENCIA: Archivos modificados durante la copia:" -ForegroundColor Yellow
-            Write-Host "$($changedFiles.Count) archivo(s) cambiaron mientras se copiaban" -ForegroundColor Yellow
-            Write-Host "Estos archivos pueden estar incompletos en el destino`n" -ForegroundColor Red
         }
     }
     
     $exitResult = Get-RobocopyExitCodeMessage -ExitCode $exitCode
-    Write-Host $exitResult.Message -ForegroundColor $exitResult.Color
-    Write-Host ""
     
     # Resumen
     Clear-Host
@@ -1049,30 +1020,8 @@ do {
     Write-Host "`n================================"
     Write-Host " TRANSFERENCIA COMPLETADA"
     Write-Host "================================"
-    Write-Host "Estado: $($exitResult.Message)" -ForegroundColor $exitResult.Color
     Write-Host "Log: $currentLogFile"
     Write-Host ""
-    
-    if ($exitResult.IsError) {
-        Write-Host "ATENCIÓN: Revise el log para identificar archivos no copiados" -ForegroundColor Red
-        Write-Host ""
-    }
-    
-    # Mostrar detalles adicionales si existen (ej: exit code 0)
-    if ($exitResult.Details) {
-        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
-        foreach ($detail in $exitResult.Details) {
-            if ($detail -match "^Posibles causas:") {
-                Write-Host $detail -ForegroundColor Yellow
-            } elseif ($detail -match "^  •") {
-                Write-Host $detail -ForegroundColor Gray
-            } else {
-                Write-Host $detail -ForegroundColor Cyan
-            }
-        }
-        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
-        Write-Host ""
-    }
     
     # Incrementar contador
     $Script:TransferenciaContador++

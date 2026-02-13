@@ -162,12 +162,13 @@ Comparando con archivos en destino para estrategia 'Reemplazar si es más nuevo'
   ... y 10 archivo(s) más no mostrados
 
 ========================================
-PREDICCIÓN (basada en muestra de 20 archivos):
+PREDICCIÓN PARA ESTRATEGIA #1 (Reemplazar si es más nuevo):
 ========================================
   ✓ Se copiarán (nuevos o más recientes): 13
   ✗ Se omitirán (misma fecha o más viejos): 3
 
-  💡 Este análisis muestra archivos de TU ORIGEN
+  💡 Este análisis es SOLO para estrategia #1
+     Si elige opción 2 o 3, el comportamiento será diferente
      Robocopy procesará los 16 archivos totales
 ========================================
 ```
@@ -198,11 +199,11 @@ Seleccione estrategia de copia:
 Seleccione (1-3, Enter=1):
 ```
 
-| Opción | ¿Qué hace? | ¿Cuándo usar? |
-|--------|------------|---------------|
-| **1** | Compara fechas de cada archivo. Solo copia si origen es más nuevo | Actualizar backups, sincronización incremental |
-| **2** | No toca archivos que ya existen en destino (sin importar fecha) | Preservar versiones en destino, no sobrescribir nada |
-| **3** | Reemplaza TODO sin comparar fechas | Forzar copia completa desde cero |
+| Opción | ¿Qué hace? | Parámetros | ¿Cuándo usar? |
+|--------|------------|------------|--------------|
+| **1** | Copia solo archivos más NUEVOS en origen. Omite archivos con misma fecha o más viejos | `/XO` | Actualizar backups, sincronización incremental (recomendado) |
+| **2** | Solo copia archivos que NO existen en destino. Omite todos los archivos existentes | `/XC /XN /XO` | Agregar archivos nuevos sin tocar nada existente |
+| **3** | Reemplaza TODO incluyendo archivos idénticos. Fuerza copia completa | `/IS /IT` | Restaurar desde backup, forzar sincronización total |
 
 **💡 Resumen clave**: 
 - El análisis de 20 archivos es SOLO para que entiendas cómo funciona
@@ -263,7 +264,21 @@ Monitor de actividad:
 
 ---
 
-### **Paso 11: Resumen Final**
+### **Paso 11: Validación Automática (Silenciosa)**
+
+El script valida automáticamente el resultado de la transferencia en segundo plano:
+
+**🔍 Validación silenciosa:**
+- ✅ Lee el log de Robocopy para verificar archivos copiados
+- ✅ Detecta y corrige exit codes incorrectos automáticamente
+- ✅ No muestra cuadros detallados (va directo al resumen)
+
+**⚠️ Corrección automática:**
+Si Robocopy devuelve exit code 0 pero copió archivos (bug conocido), el script lo corrige a exit code 1 sin notificarte. La validación es completamente automática.
+
+---
+
+### **Paso 12: Resumen Final**
 
 ```
 --------------------------------
@@ -298,10 +313,11 @@ Log: C:\Logs\robocopy_20260212_143055_transferencia1.txt
 | **Bytes** | Tamaño total copiado |
 
 **Estados posibles:**
-- ✅ **Éxito**: Todo copiado correctamente
-- ✅ **Sin cambios**: Archivos ya estaban actualizados
-- ⚠️ **Advertencia**: Algunos archivos no coinciden
-- ❌ **Error**: Algunos archivos NO se copiaron
+- ✅ **Éxito**: Archivos copiados correctamente (exit code 1)
+- 🔵 **Sin cambios**: Archivos ya sincronizados (exit code 0) 
+- ✅ **Éxito con extras**: Archivos extra en destino (exit code 2-3)
+- ⚠️ **Advertencia**: Algunos archivos no coinciden (exit code 4-7)
+- ❌ **Error**: Algunos archivos NO se copiaron (exit code 8+)
 
 ---
 

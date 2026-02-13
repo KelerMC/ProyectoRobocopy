@@ -162,12 +162,13 @@ Comparing with destination files for 'Replace if newer' strategy
   ... and 10 more file(s) not shown
 
 ========================================
-PREDICTION (based on sample of 20 files):
+PREDICTION FOR STRATEGY #1 (Replace if newer):
 ========================================
   ✓ Will be copied (new or more recent): 13
   ✗ Will be skipped (same date or older): 3
 
-  💡 This analysis shows files from YOUR SOURCE
+  💡 This analysis is ONLY for strategy #1
+     If you choose option 2 or 3, behavior will be different
      Robocopy will process all 16 files
 ========================================
 ```
@@ -198,11 +199,11 @@ Select copy strategy:
 Select (1-3, Enter=1):
 ```
 
-| Option | What it does | When to use |
-|--------|--------------|-------------|
-| **1** | Compares dates for each file. Only copies if source is newer | Update backups, incremental sync |
-| **2** | Does not touch files that already exist at destination (regardless of date) | Preserve destination versions, don't overwrite anything |
-| **3** | Replaces EVERYTHING without comparing dates | Force complete copy from scratch |
+| Option | What it does | Parameters | When to use |
+|--------|--------------|------------|-------------|
+| **1** | Copies only NEWER files from source. Skips files with same date or older | `/XO` | Update backups, incremental sync (recommended) |
+| **2** | Only copies files that DO NOT exist at destination. Skips all existing files | `/XC /XN /XO` | Add new files without touching existing ones |
+| **3** | Replaces EVERYTHING including identical files. Forces complete copy | `/IS /IT` | Restore from backup, force total synchronization |
 
 **💡 Key summary**: 
 - The 20-file analysis is ONLY to help you understand how it works
@@ -263,7 +264,21 @@ Activity monitor:
 
 ---
 
-### **Step 11: Final Summary**
+### **Step 11: Automatic Validation (Silent)**
+
+The script automatically validates the transfer result in the background:
+
+**🔍 Silent validation:**
+- ✅ Reads Robocopy log to verify copied files
+- ✅ Detects and corrects incorrect exit codes automatically
+- ✅ No detailed boxes displayed (goes straight to summary)
+
+**⚠️ Automatic correction:**
+If Robocopy returns exit code 0 but copied files (known bug), the script corrects it to exit code 1 without notifying you. Validation is completely automatic.
+
+---
+
+### **Step 12: Final Summary**
 
 ```
 --------------------------------
