@@ -1,16 +1,16 @@
 # 📁 Guía de Usuario - Transferencia Automatizada NAS
 
-**Versión 3.1** | Herramienta para copiar archivos al NAS de forma segura y eficiente
+**Versión 1.0** | Herramienta para copiar archivos al NAS de forma segura y eficiente
 
 ---
 
 ## 🚀 Inicio Rápido
 
 ### ¿Qué hace este programa?
-Copia carpetas completas desde tu computadora hacia el NAS (almacenamiento de red) de manera automática, con validaciones y protección contra errores.
+Copia carpetas completas desde tu computadora hacia el NAS (almacenamiento de red) de manera automática.
 
 ### Requisitos
-- ✅ Windows 10 o superior
+- ✅ Windows 11
 - ✅ Conexión de red al NAS
 - ✅ Credenciales del NAS (usuario y contraseña)
 
@@ -20,12 +20,13 @@ Copia carpetas completas desde tu computadora hacia el NAS (almacenamiento de re
 
 ### **Paso 1: Preparación**
 
-1. **Verificar acceso al NAS** (recomendado):
+1. **Verificar acceso al NAS** (IMPORTANTE - OBLIGATORIO):
    - Abre el **Explorador de Archivos**
    - En la barra de direcciones escribe: `\\192.168.1.254`
    - Presiona Enter
-   - Si pide credenciales, ingrésalas y marca **"Recordar mis credenciales"**
+   - **Si pide credenciales, ingrésalas y marca "Recordar mis credenciales"**
    - Verifica que puedas ver las carpetas del NAS
+   - ✅ **Este paso evita que el script pida credenciales nuevamente**
 
 2. **Configurar permisos** (solo la primera vez):
    - Abre PowerShell
@@ -47,17 +48,18 @@ Copia carpetas completas desde tu computadora hacia el NAS (almacenamiento de re
 ```
 ================================
  TRANSFERENCIA AUTOMATIZADA NAS
- Versión 3.1
+ Versión 1.0
 ================================
 
 Seleccione la carpeta de destino en el NAS:
 
-  1. Pruebas
-  2. Historico
-  3. EDI
-  4. Otra (ingresar manualmente)
+  1. Historico
+  2. EDI
+  3. ATO
+  4. Pruebas
+  5. Otra
 
-Ingrese opción (1-4):
+Ingrese opción (1-5):
 ```
 
 ---
@@ -66,29 +68,13 @@ Ingrese opción (1-4):
 
 **Opción recomendada**: Elige `1`, `2` o `3` para carpetas predefinidas
 
-**Opción avanzada**: Elige `4` para ingresar una ruta personalizada
+**Opción avanzada**: Elige `5` para ingresar una ruta personalizada
 - Formato: `\\192.168.1.254\NombreCarpeta`
 - Ejemplo: `\\192.168.1.254\Proyectos`
 
 ---
 
-### **Paso 4: Autenticación**
-
-Si es la primera vez o las credenciales expiraron:
-
-```
-Conectando al NAS...
-Se requieren credenciales.
-```
-
-**Ventana emergente aparecerá:**
-- Usuario: Tu usuario del NAS
-- Contraseña: Tu contraseña del NAS
-- ✅ Las credenciales se guardan durante la sesión
-
----
-
-### **Paso 5: Seleccionar Carpeta Origen**
+### **Paso 4: Seleccionar Carpeta Origen**
 
 ```
 Ingrese ruta ORIGEN (carpeta completa): 
@@ -103,7 +89,7 @@ Ingrese ruta ORIGEN (carpeta completa):
 
 ---
 
-### **Paso 6: Validaciones Automáticas**
+### **Paso 5: Validaciones Automáticas**
 
 El programa verificará:
 
@@ -124,7 +110,7 @@ Archivos encontrados: 1234
 
 ---
 
-### **Paso 7: Confirmar Destino**
+### **Paso 6: Confirmar Destino**
 
 ```
 Resumen:
@@ -141,26 +127,70 @@ Ingrese S para continuar o N para poner otra destino:
 
 ---
 
-### **Paso 8: Archivos Existentes** (si aplica)
+### **Paso 7: Archivos Existentes** (si aplica)
 
 Si el destino ya tiene archivos:
 
 ```
-¿Desea ver la lista de archivos existentes? (S/N):
+El destino contiene archivos existentes
+
+Información de la transferencia:
+  Total de archivos en ORIGEN: 16 archivos
+  Tamaño total: 67.3 MB
+  Archivos encontrados en DESTINO: 50+ archivos
+
+¿Desea analizar archivos antes de copiar? (S/N):
 ```
 
-**Si eliges S**, verás hasta 20 archivos de ejemplo:
+**💡 Nuevo comportamiento:**
+- **ANALIZA TUS ARCHIVOS DE ORIGEN** (no los del destino)
+- Muestra exactamente qué archivos DE TU ORIGEN se copiarán o se omitirán
+- Predicción más precisa para estrategia #1 (Reemplazar si es más nuevo)
+
+**Si eliges S**, el programa analizará hasta 20 archivos de TU ORIGEN:
+
 ```
-Primeros archivos encontrados:
-  - documento1.pdf
-  - imagen.jpg
-  - reporte.xlsx
-  ... y potencialmente más archivos
+Analizando archivos de ORIGEN (muestra de hasta 20)...
+Comparando con archivos en destino para estrategia 'Reemplazar si es más nuevo'
+
+  ✓ \nochancar1.txt [MÁS NUEVO - se copiará]
+  ✗ \nochancar2.txt [misma fecha - se omitirá]
+  ✗ \nochancar3.txt [misma fecha - se omitirá]
+  ✓ \BBBB_BBBB\archivoNUEVO.pdf [NUEVO - se copiará]
+  ✓ \BBBB_BBBB\archivoMOD.xlsx [MÁS NUEVO - se copiará]
+  ✗ \BBBB_BBBB\archivoSIN_CAMBIO.doc [misma fecha - se omitirá]
+  ... y 10 archivo(s) más no mostrados
+
+========================================
+PREDICCIÓN (basada en muestra de 20 archivos):
+========================================
+  ✓ Se copiarán (nuevos o más recientes): 13
+  ✗ Se omitirán (misma fecha o más viejos): 3
+
+  💡 Este análisis muestra archivos de TU ORIGEN
+     Robocopy procesará los 16 archivos totales
+========================================
 ```
+
+**🔍 Leyenda:**
+- **✓** (marca verde) = Se COPIARÁ este archivo
+  - `[MÁS NUEVO]`: Tu versión es más reciente
+  - `[NUEVO]`: No existe en destino
+- **✗** (marca gris) = Se OMITIRÁ este archivo
+  - `[misma fecha]`: Fechas idénticas
+  - `[más viejo]`: Destino tiene versión más nueva
+
+**🎯 Ventajas del nuevo análisis:**
+1. Muestra TUS archivos que vas a copiar
+2. Identifica archivos NUEVOS (que no existen en destino)
+3. Predicción más precisa de lo que Robocopy hará
+4. Fácil de entender: ✓ = copiar, ✗ = omitir
 
 **Luego elige estrategia:**
 ```
 Seleccione estrategia de copia:
+(Esta estrategia se aplicará a TODOS los archivos de la transferencia)
+
   1. Reemplazar si es más nuevo (recomendado)
   2. Omitir archivos existentes
   3. Sobrescribir todo
@@ -170,13 +200,18 @@ Seleccione (1-3, Enter=1):
 
 | Opción | ¿Qué hace? | ¿Cuándo usar? |
 |--------|------------|---------------|
-| **1** | Solo copia archivos más recientes | Actualizar backups |
-| **2** | No toca archivos que ya existen | Sincronización sin pérdida |
-| **3** | Reemplaza todo | Forzar copia completa |
+| **1** | Compara fechas de cada archivo. Solo copia si origen es más nuevo | Actualizar backups, sincronización incremental |
+| **2** | No toca archivos que ya existen en destino (sin importar fecha) | Preservar versiones en destino, no sobrescribir nada |
+| **3** | Reemplaza TODO sin comparar fechas | Forzar copia completa desde cero |
+
+**💡 Resumen clave**: 
+- El análisis de 20 archivos es SOLO para que entiendas cómo funciona
+- Los números reales los verás al final en el resumen de Robocopy
+- Robocopy compara CADA archivo de tu origen contra lo que existe en destino
 
 ---
 
-### **Paso 9: Opciones de Archivos**
+### **Paso 8: Opciones de Archivos**
 
 ```
 ¿Desea excluir archivos temporales y de sistema?
@@ -190,7 +225,7 @@ Seleccione (1-3, Enter=1):
 
 ---
 
-### **Paso 10: Verificación de Espacio**
+### **Paso 9: Verificación de Espacio**
 
 ```
 Verificando espacio disponible...
@@ -205,7 +240,7 @@ Timeout configurado: 7.5 minutos (ajustado según tamaño)
 
 ---
 
-### **Paso 11: Transferencia en Progreso**
+### **Paso 10: Transferencia en Progreso**
 
 ```
 Iniciando transferencia...
@@ -228,7 +263,7 @@ Monitor de actividad:
 
 ---
 
-### **Paso 12: Resumen Final**
+### **Paso 11: Resumen Final**
 
 ```
 --------------------------------
@@ -387,9 +422,10 @@ C:\Logs\robocopy_[fecha]_[hora]_transferencia[N].txt
 
 ## 📄 Versión del Documento
 
-**Versión**: 1.1  
+**Versión**: 1.0  
 **Fecha**: 13 de febrero de 2026  
-**Compatible con**: Transferencia-NAS-v3.0.ps1 (v3.2)
+**Compatible con**: Transferencia-NAS-v3.0.ps1 (v1.0)  
+**Estado**: Pre-producción
 
 ---
 

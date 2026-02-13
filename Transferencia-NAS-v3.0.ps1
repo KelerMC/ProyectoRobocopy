@@ -7,7 +7,13 @@
     manejo de errores y protección contra pérdida de conexión.
     Optimizado para carpetas grandes y rutas largas (+240 caracteres).
 
-FEATURES
+.NOTES
+    Versión: 1.0
+    Autor: Sistema Automatizado
+    Fecha: 2026-02-13
+    Estado: Pre-producción
+    
+.FEATURES
     - Arquitectura UNC directa (sin mapeo de unidades)
     - Validaciones eficientes con un solo escaneo de origen
     - Detección simple y rápida de archivos existentes
@@ -25,6 +31,7 @@ FEATURES
 #region ===== CONFIGURACIÓN GLOBAL =====
 
 # Constantes del sistema
+$SCRIPT_VERSION = "1.0"
 $LOG_DIRECTORY = "C:\Logs"
 $LOG_RETENTION_DAYS = 30
 $CONNECTION_CHECK_INTERVAL = 10  # segundos
@@ -32,9 +39,11 @@ $MIN_TIMEOUT_SECONDS = 300       # 5 minutos mínimo
 
 # Configuración NAS predefinida
 $NAS_PRESETS = @{
-    "1" = @{ Name = "Pruebas";   Path = "\\192.168.1.254\Pruebas" }
-    "2" = @{ Name = "Historico"; Path = "\\192.168.1.254\Historico" }
-    "3" = @{ Name = "EDI";       Path = "\\192.168.1.254\edi" }
+    "1" = @{ Name = "Historico"; Path = "\\192.168.1.254\Historico" }
+    "2" = @{ Name = "EDI";       Path = "\\192.168.1.254\edi" }
+    "3" = @{ Name = "ATO";       Path = "\\192.168.1.254\ato" }
+    "4" = @{ Name = "Pruebas";   Path = "\\192.168.1.254\Pruebas" }
+    "5" = @{ Name = "Otra";      Path = "" }
 }
 
 # Variables de sesión
@@ -498,8 +507,15 @@ function Get-RobocopyExitCodeMessage {
     
     switch ($ExitCode) {
         0 {
-            $result.Message = "Sin cambios - Todos los archivos ya estaban sincronizados"
-            $result.Color = "Green"
+            $result.Message = "Sin cambios - No se copió ningún archivo"
+            $result.Color = "Yellow"
+            $result.Details = @(
+                "Posibles causas:",
+                "  • Los archivos de origen NO son más nuevos que los del destino",
+                "  • Las fechas de modificación son iguales o más viejas",
+                "  • No hay archivos nuevos para copiar",
+                "Revise el resumen arriba para confirmar: Copiado = 0, Omitido = todos"
+            )
         }
         1 {
             $result.Message = "Éxito - Archivos copiados correctamente"
@@ -533,10 +549,11 @@ function Get-RobocopyExitCodeMessage {
 
 # Inicialización
 Clear-Host
-$Host.UI.RawUI.WindowTitle = "Transferencia Automatizada NAS"
+$Host.UI.RawUI.WindowTitle = "Transferencia Automatizada NAS v$SCRIPT_VERSION"
 
 Write-Host "================================"
 Write-Host " TRANSFERENCIA AUTOMATIZADA NAS"
+Write-Host " Versión $SCRIPT_VERSION"
 Write-Host "================================"
 Write-Host ""
 
@@ -551,44 +568,46 @@ Write-Host ""
 foreach ($key in ($NAS_PRESETS.Keys | Sort-Object)) {
     Write-Host "  $key. $($NAS_PRESETS[$key].Name)"
 }
-Write-Host "  4. Otra (ingresar manualmente)"
 Write-Host ""
 
 do {
-    $option = Read-Host "Ingrese opción (1-4)"
+    $option = Read-Host "Ingrese opción (1-5)"
     
     if ($NAS_PRESETS.ContainsKey($option)) {
         $selectedNAS = $NAS_PRESETS[$option].Path
-        break
-    } elseif ($option -eq "4") {
-        do {
-            $selectedNAS = Read-Host "Ingrese la ruta completa del NAS (ej: \\192.168.1.254\MiCarpeta)"
-            
-            if ($selectedNAS -notmatch '^\\\\[^\\]+\\[^\\]+') {
-                Write-Host "ERROR: La ruta debe tener formato UNC (\\servidor\recurso)" -ForegroundColor Red
-                $retry = Read-Host "¿Desea intentar nuevamente? (S/N)"
-                if ($retry -notmatch '^(S|SI|Y|YES)$') {
-                    $option = $null
-                    break
-                }
-                $selectedNAS = $null
-                continue
-            }
-            
-            Write-Host "Verificando accesibilidad..." -ForegroundColor Cyan
-            if (-not (Test-Path $selectedNAS -ErrorAction SilentlyContinue)) {
-                Write-Host "ADVERTENCIA: No se puede acceder a la ruta" -ForegroundColor Yellow
-                $continue = Read-Host "¿Continuar de todos modos? (S/N)"
-                if ($continue -notmatch '^(S|SI|Y|YES)$') {
+        
+        # Si el path está vacío, solicitar entrada manual
+        if ([string]::IsNullOrEmpty($selectedNAS)) {
+            do {
+                $selectedNAS = Read-Host "Ingrese la ruta completa del NAS (ej: \\192.168.1.254\MiCarpeta)"
+                
+                if ($selectedNAS -notmatch '^\\\\[^\\]+\\[^\\]+') {
+                    Write-Host "ERROR: La ruta debe tener formato UNC (\\servidor\recurso)" -ForegroundColor Red
+                    $retry = Read-Host "¿Desea intentar nuevamente? (S/N)"
+                    if ($retry -notmatch '^(S|SI|Y|YES)$') {
+                        $option = $null
+                        break
+                    }
                     $selectedNAS = $null
                     continue
                 }
-            }
+                
+                Write-Host "Verificando accesibilidad..." -ForegroundColor Cyan
+                if (-not (Test-Path $selectedNAS -ErrorAction SilentlyContinue)) {
+                    Write-Host "ADVERTENCIA: No se puede acceder a la ruta" -ForegroundColor Yellow
+                    $continue = Read-Host "¿Continuar de todos modos? (S/N)"
+                    if ($continue -notmatch '^(S|SI|Y|YES)$') {
+                        $selectedNAS = $null
+                        continue
+                    }
+                }
+                
+                break
+            } while ($true)
             
-            break
-        } while ($true)
+            if ($null -eq $option) { continue }
+        }
         
-        if ($null -eq $option) { continue }
         break
     } else {
         Write-Host "Opción inválida. Intente nuevamente." -ForegroundColor Yellow
@@ -766,24 +785,77 @@ do {
     
     if ($hasExistingFiles) {
         Write-Host "El destino contiene archivos existentes" -ForegroundColor Yellow
+        Write-Host "`nInformación de la transferencia:" -ForegroundColor Cyan
+        Write-Host "  Total de archivos en ORIGEN: $fileCount archivos" -ForegroundColor White
+        Write-Host "  Tamaño total: $totalMB MB" -ForegroundColor White
+        Write-Host "  Archivos encontrados en DESTINO: $($existingFiles.Count)+ archivos" -ForegroundColor Gray
         
-        # Preguntar si quiere ver la lista
-        $showFiles = Read-Host "`n¿Desea ver la lista de archivos existentes? (S/N)"
+        # Preguntar si quiere ver análisis previo
+        $showFiles = Read-Host "`n¿Desea analizar archivos antes de copiar? (S/N)"
         
         if ($showFiles -match '^(S|SI|Y|YES)$') {
-            Write-Host "`nPrimeros archivos encontrados:" -ForegroundColor Cyan
-            $showCount = [math]::Min(20, $existingFiles.Count)
+            Write-Host "`nAnalizando archivos de ORIGEN (muestra de hasta 20)..." -ForegroundColor Cyan
+            Write-Host "Comparando con archivos en destino para estrategia 'Reemplazar si es más nuevo'`n" -ForegroundColor Yellow
+            
+            $willCopy = 0      # Nuevos o más recientes
+            $willSkip = 0      # Misma fecha o más viejos
+            $showCount = [math]::Min(20, $allFiles.Count)
+            
             for ($i = 0; $i -lt $showCount; $i++) {
-                $relPath = $existingFiles[$i].FullName.Replace($finalDestination, "")
-                Write-Host "  - $relPath" -ForegroundColor Gray
+                $srcFile = $allFiles[$i]
+                $relPath = $srcFile.FullName.Replace($sourcePath, "")
+                $destFilePath = Join-Path $finalDestination $relPath
+                
+                if (Test-Path $destFilePath) {
+                    # Archivo existe en destino - comparar fechas
+                    $destFile = Get-Item $destFilePath -ErrorAction SilentlyContinue
+                    if ($destFile) {
+                        if ($srcFile.LastWriteTime -gt $destFile.LastWriteTime) {
+                            # Origen más nuevo → SE COPIARÁ
+                            Write-Host "  ✓ $relPath" -ForegroundColor Green -NoNewline
+                            Write-Host " [MÁS NUEVO - se copiará]" -ForegroundColor Yellow
+                            $willCopy++
+                        } elseif ($srcFile.LastWriteTime -lt $destFile.LastWriteTime) {
+                            # Origen más viejo → SE OMITIRÁ
+                            Write-Host "  ✗ $relPath" -ForegroundColor Gray -NoNewline
+                            Write-Host " [más viejo - se omitirá]" -ForegroundColor DarkGray
+                            $willSkip++
+                        } else {
+                            # Misma fecha → SE OMITIRÁ
+                            Write-Host "  ✗ $relPath" -ForegroundColor Gray -NoNewline
+                            Write-Host " [misma fecha - se omitirá]" -ForegroundColor DarkGray
+                            $willSkip++
+                        }
+                    }
+                } else {
+                    # Archivo NO existe en destino → SE COPIARÁ
+                    Write-Host "  ✓ $relPath" -ForegroundColor Green -NoNewline
+                    Write-Host " [NUEVO - se copiará]" -ForegroundColor Cyan
+                    $willCopy++
+                }
             }
-            if ($existingFiles.Count -gt 20) {
-                Write-Host "  ... y potencialmente más archivos" -ForegroundColor Gray
+            
+            if ($allFiles.Count -gt 20) {
+                $remaining = $allFiles.Count - 20
+                Write-Host "`n  ... y $remaining archivo(s) más no mostrados" -ForegroundColor Gray
             }
+            
+            Write-Host "`n" -NoNewline
+            Write-Host "========================================" -ForegroundColor Cyan
+            Write-Host "PREDICCIÓN (basada en muestra de $showCount archivos):" -ForegroundColor Cyan
+            Write-Host "========================================" -ForegroundColor Cyan
+            Write-Host "  ✓ Se copiarán (nuevos o más recientes): $willCopy" -ForegroundColor Green
+            Write-Host "  ✗ Se omitirán (misma fecha o más viejos): $willSkip" -ForegroundColor Gray
+            Write-Host "`n" -NoNewline
+            Write-Host "  💡 Este análisis muestra archivos de TU ORIGEN" -ForegroundColor Yellow
+            Write-Host "     Robocopy procesará los $fileCount archivos totales" -ForegroundColor Cyan
+            Write-Host "========================================" -ForegroundColor Cyan
         }
         
         Write-Host ""
         Write-Host "Seleccione estrategia de copia:" -ForegroundColor Cyan
+        Write-Host "(Esta estrategia se aplicará a TODOS los archivos de la transferencia)" -ForegroundColor Yellow
+        Write-Host ""
         Write-Host "  1. Reemplazar si es más nuevo (recomendado)"
         Write-Host "  2. Omitir archivos existentes"
         Write-Host "  3. Sobrescribir todo"
@@ -793,9 +865,21 @@ do {
         if ([string]::IsNullOrWhiteSpace($strategy)) { $strategy = "1" }
         
         switch ($strategy) {
-            "1" { $strategyParams = ""; Write-Host "Estrategia: Reemplazar más nuevos" -ForegroundColor Green }
-            "2" { $strategyParams = "/XC /XN /XO"; Write-Host "Estrategia: Omitir existentes" -ForegroundColor Green }
-            "3" { $strategyParams = "/IS"; Write-Host "Estrategia: Sobrescribir todo" -ForegroundColor Green }
+            "1" { 
+                $strategyParams = ""
+                Write-Host "Estrategia: Reemplazar más nuevos" -ForegroundColor Green
+                Write-Host "Robocopy copiará archivos cuya fecha de origen sea más reciente" -ForegroundColor Cyan
+            }
+            "2" { 
+                $strategyParams = "/XC /XN /XO"
+                Write-Host "Estrategia: Omitir existentes" -ForegroundColor Green
+                Write-Host "Robocopy NO tocará ningún archivo que ya exista en destino" -ForegroundColor Cyan
+            }
+            "3" { 
+                $strategyParams = "/IS"
+                Write-Host "Estrategia: Sobrescribir todo" -ForegroundColor Green
+                Write-Host "Robocopy reemplazará TODOS los archivos sin importar la fecha" -ForegroundColor Yellow
+            }
             default { $strategyParams = "" }
         }
         Write-Host ""
@@ -877,16 +961,39 @@ do {
     
     # Validar resultado
     Write-SectionHeader -Title "VALIDACION DE RESULTADO" -Color Cyan
-    Write-Host "Código de salida Robocopy: $exitCode" -ForegroundColor Cyan
+    Write-Host "Código de salida Robocopy RAW: $exitCode" -ForegroundColor Cyan
     
-    # Detectar archivos modificados durante copia
-    $filesChangedDuringCopy = $false
+    # Detectar archivos copiados del log (validación adicional)
+    $actualFilesCopied = 0
+    $actualFilesSkipped = 0
     if (Test-Path $currentLogFile) {
         $logContent = Get-Content $currentLogFile -ErrorAction SilentlyContinue
+        
+        # Buscar línea de resumen de archivos
+        $fileSummaryLine = $logContent | Select-String -Pattern "^\s+Archivos:\s+" | Select-Object -Last 1
+        if ($fileSummaryLine) {
+            # Parsear: "Archivos:  16  13  3  0  0  0"
+            # Formato: Total, Copiado, Omitido, No coincide, ERROR, Extras
+            if ($fileSummaryLine -match "Archivos:\s+(\d+)\s+(\d+)\s+(\d+)") {
+                $actualFilesCopied = [int]$matches[2]
+                $actualFilesSkipped = [int]$matches[3]
+                Write-Host "Archivos copiados (según log): $actualFilesCopied" -ForegroundColor $(if ($actualFilesCopied -gt 0) { 'Green' } else { 'Gray' })
+                Write-Host "Archivos omitidos (según log): $actualFilesSkipped" -ForegroundColor Gray
+            }
+        }
+        
+        # Corregir exit code si es necesario
+        if ($exitCode -eq 0 -and $actualFilesCopied -gt 0) {
+            Write-Host ""
+            Write-Host "⚠️ CORRECCIÓN: El exit code era 0 pero se copiaron $actualFilesCopied archivos" -ForegroundColor Yellow
+            Write-Host "   Ajustando exit code a 1 (Éxito con archivos copiados)" -ForegroundColor Yellow
+            $exitCode = 1
+        }
+        
+        # Detectar archivos modificados durante copia
         $changedFiles = $logContent | Select-String -Pattern "ERROR.*file has changed|changed during copy" -SimpleMatch
         
         if ($changedFiles) {
-            $filesChangedDuringCopy = $true
             Write-Host ""
             Write-Host "ADVERTENCIA: Archivos modificados durante la copia:" -ForegroundColor Yellow
             Write-Host "$($changedFiles.Count) archivo(s) cambiaron mientras se copiaban" -ForegroundColor Yellow
@@ -942,12 +1049,28 @@ do {
     Write-Host "`n================================"
     Write-Host " TRANSFERENCIA COMPLETADA"
     Write-Host "================================"
-    Write-Host "Estado: $($exitResult.Message)"
+    Write-Host "Estado: $($exitResult.Message)" -ForegroundColor $exitResult.Color
     Write-Host "Log: $currentLogFile"
     Write-Host ""
     
     if ($exitResult.IsError) {
         Write-Host "ATENCIÓN: Revise el log para identificar archivos no copiados" -ForegroundColor Red
+        Write-Host ""
+    }
+    
+    # Mostrar detalles adicionales si existen (ej: exit code 0)
+    if ($exitResult.Details) {
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+        foreach ($detail in $exitResult.Details) {
+            if ($detail -match "^Posibles causas:") {
+                Write-Host $detail -ForegroundColor Yellow
+            } elseif ($detail -match "^  •") {
+                Write-Host $detail -ForegroundColor Gray
+            } else {
+                Write-Host $detail -ForegroundColor Cyan
+            }
+        }
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
         Write-Host ""
     }
     
