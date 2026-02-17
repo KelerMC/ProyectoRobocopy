@@ -7,12 +7,6 @@
     manejo de errores y protección contra pérdida de conexión.
     Optimizado para carpetas grandes y rutas largas (+240 caracteres).
 
-.NOTES
-    Versión: 1.0
-    Autor: Sistema Automatizado
-    Fecha: 2026-02-13
-    Estado: Pre-producción
-    
 .FEATURES
     - Arquitectura UNC directa (sin mapeo de unidades)
     - Validaciones eficientes con un solo escaneo de origen
@@ -26,7 +20,7 @@
     - Optimizado para proyectos de ingeniería civil
 #>
 
-#Requires -Version 5.1
+#Requires -Version 1.0
 
 #region ===== CONFIGURACIÓN GLOBAL =====
 

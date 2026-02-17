@@ -304,23 +304,6 @@ Log: C:\Logs\robocopy_20260212_143055_transferencia1.txt
 
 ---
 
-## 🔍 Entender el Resumen
-
-| Columna | Significado |
-|---------|-------------|
-| **Dirs** | Cantidad de carpetas |
-| **Files** | Cantidad de archivos |
-| **Bytes** | Tamaño total copiado |
-
-**Estados posibles:**
-- ✅ **Éxito**: Archivos copiados correctamente (exit code 1)
-- 🔵 **Sin cambios**: Archivos ya sincronizados (exit code 0) 
-- ✅ **Éxito con extras**: Archivos extra en destino (exit code 2-3)
-- ⚠️ **Advertencia**: Algunos archivos no coinciden (exit code 4-7)
-- ❌ **Error**: Algunos archivos NO se copiaron (exit code 8+)
-
----
-
 ## 📋 Logs y Registros
 
 ### Ubicación de Logs
@@ -435,14 +418,3 @@ C:\Logs\robocopy_[fecha]_[hora]_transferencia[N].txt
 | **Log** | Archivo de registro con detalles de la operación |
 
 ---
-
-## 📄 Versión del Documento
-
-**Versión**: 1.0  
-**Fecha**: 13 de febrero de 2026  
-**Compatible con**: Transferencia-NAS-v3.0.ps1 (v1.0)  
-**Estado**: Pre-producción
-
----
-
-✨ **¡Gracias por usar Transferencia Automatizada NAS!** ✨

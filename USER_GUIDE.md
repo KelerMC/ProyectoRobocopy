@@ -402,7 +402,7 @@ C:\Logs\robocopy_YYYYMMDD_HHMMSS_transferN.txt
 
 ---
 
-## 📞 Support
+## Support
 
 ### Need help?
 
@@ -416,11 +416,6 @@ C:\Logs\robocopy_[date]_[time]_transfer[N].txt
 - Source and destination path
 - Log file contents
 - File size and quantity
-
-**Contact:**
-- IT Area - EVT Peru Branch
-- Keler Modesto
-
 ---
 
 ## 📚 Glossary
@@ -435,13 +430,3 @@ C:\Logs\robocopy_[date]_[time]_transfer[N].txt
 
 ---
 
-## 📄 Document Version
-
-**Version**: 1.0  
-**Date**: February 13, 2026  
-**Compatible with**: NAS-Transfer-v1.0.ps1 (v1.0)  
-**Status**: Pre-production
-
----
-
-✨ **Thank you for using Automated NAS Transfer!** ✨
