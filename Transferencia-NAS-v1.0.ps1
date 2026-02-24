@@ -419,36 +419,59 @@ function Start-FileTransfer {
             $lastConnectionCheck = Get-Date
         }
         
-        # Verificar actividad del log
+        # Verificar actividad del log o archivos en destino
+        $activityDetected = $false
+        
         if (Test-Path $LogFile) {
             $logSize = (Get-Item $LogFile).Length
             if ($logSize -gt $lastLogSize) {
                 $lastLogSize = $logSize
-                $lastActivity = Get-Date
+                $activityDetected = $true
+            }
+        }
+        
+        # Verificar actividad también mirando archivos modificados recientemente en destino
+        if (-not $activityDetected) {
+            try {
+                $recentFiles = Get-ChildItem -Path $Destination -Recurse -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.LastWriteTime -gt (Get-Date).AddSeconds(-30) } |
+                    Select-Object -First 1
                 
-                # Detectar errores repetidos cada 30 segundos
-                if (((Get-Date) - $lastErrorCheck).TotalSeconds -ge 30) {
-                    $logContent = Get-Content $LogFile -Tail 20 -ErrorAction SilentlyContinue
-                    $recentErrors = ($logContent | Select-String -Pattern "ERROR|Esperando.*segundos.*Reintentando").Count
-                    
-                    if ($recentErrors -gt 5) {
-                        $errorCount++
-                        if ($errorCount -ge 3) {
-                            Write-Progress -Activity "Copiando archivos..." -Completed
-                            Write-Host "`n`nERROR: Robocopy atascado en bucle de reintentos" -ForegroundColor Red
-                            Write-Host "Errores detectados en log. Revise: $LogFile" -ForegroundColor Yellow
-                            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-                            Pause
-                            exit 1
-                        }
-                    } else {
-                        $errorCount = 0
-                    }
-                    $lastErrorCheck = Get-Date
+                if ($recentFiles) {
+                    $activityDetected = $true
                 }
+            } catch {
+                # Ignorar errores de acceso
+            }
+        }
+        
+        if ($activityDetected) {
+            $lastActivity = Get-Date
+            
+            # Detectar errores repetidos cada 30 segundos
+            if (((Get-Date) - $lastErrorCheck).TotalSeconds -ge 30) {
+                $logContent = Get-Content $LogFile -Tail 20 -ErrorAction SilentlyContinue
+                $recentErrors = ($logContent | Select-String -Pattern "ERROR|Esperando.*segundos.*Reintentando").Count
                 
-                # Mostrar progreso simple basado en log
-                $logSizeKB = [math]::Round($logSize/1KB, 1)
+                if ($recentErrors -gt 5) {
+                    $errorCount++
+                    if ($errorCount -ge 3) {
+                        Write-Progress -Activity "Copiando archivos..." -Completed
+                        Write-Host "`n`nERROR: Robocopy atascado en bucle de reintentos" -ForegroundColor Red
+                        Write-Host "Errores detectados en log. Revise: $LogFile" -ForegroundColor Yellow
+                        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                        Pause
+                        exit 1
+                    }
+                } else {
+                    $errorCount = 0
+                }
+                $lastErrorCheck = Get-Date
+            }
+            
+            # Mostrar progreso simple basado en log
+            if (Test-Path $LogFile) {
+                $logSizeKB = [math]::Round((Get-Item $LogFile).Length/1KB, 1)
                 Write-Progress -Activity "Copiando archivos..." `
                     -Status "Robocopy activo - Log: $logSizeKB KB" `
                     -PercentComplete 50
@@ -927,9 +950,10 @@ do {
         Write-Host "No se pudo verificar espacio en destino`n" -ForegroundColor Yellow
     }
     
-    # Calcular timeout dinámico
+    # Calcular timeout dinámico (más realista: 10 minutos por GB + 20 min base)
     $totalGB = [math]::Round($totalSize / 1GB, 2)
-    $timeoutSeconds = [math]::Max($MIN_TIMEOUT_SECONDS, 60 * [math]::Ceiling($totalGB))
+    $baseTimeout = 1200  # 20 minutos base
+    $timeoutSeconds = [math]::Max($MIN_TIMEOUT_SECONDS, $baseTimeout + (600 * [math]::Ceiling($totalGB)))
     Write-Host "Timeout configurado: $([math]::Round($timeoutSeconds / 60, 1)) minutos (ajustado según tamaño)`n" -ForegroundColor Cyan
     
     # Configurar parámetros de Robocopy
